@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>课堂限时博弈 - 囚徒困境实时对战</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .neon-glow {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
+        }
+        .cooperate-glow {
+            box-shadow: 0 0 30px rgba(34, 197, 94, 0.6);
+        }
+        .betray-glow {
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.6);
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(99, 102, 241, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+        }
+        .pulse-ring {
+            animation: pulse-ring 2s infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        .float {
+            animation: float 3s ease-in-out infinite;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .matrix-cell {
+            transition: all 0.3s ease;
+        }
+        .matrix-cell:hover {
+            transform: scale(1.05);
+        }
+        .progress-bar {
+            transition: width 1s linear;
+        }
+        .particle {
+            position: absolute;
+            pointer-events: none;
+            animation: particle-float 3s ease-out forwards;
+        }
+        @keyframes particle-float {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 0; transform: translateY(-100px) scale(0); }
+        }
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen overflow-x-hidden">
+
+    <!-- 背景动画 -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute top-0 left-0 w-full h-full">
+            <div class="absolute top-10 left-10 w-72 h-72 bg-indigo-600 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
+            <div class="absolute top-10 right-10 w-72 h-72 bg-purple-600 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
+            <div class="absolute -bottom-8 left-20 w-72 h-72 bg-pink-600 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
+        </div>
+    </div>
+
+    <!-- 角色选择界面 -->
+    <div id="role-selection" class="relative z-10 flex flex-col items-center justify-center min-h-screen p-4">
+        <div class="text-center mb-12 float">
+            <h1 class="text-6xl font-black mb-4 gradient-text tracking-tight">课堂限时博弈</h1>
+            <p class="text-xl text-slate-400">Prisoner's Dilemma Classroom Edition</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-8 max-w-4xl w-full">
+            <!-- 教师入口 -->
+            <button onclick="enterAsTeacher()" class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 to-purple-700 p-8 transition-all hover:scale-105 hover:shadow-2xl neon-glow">
+                <div class="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 transition-opacity"></div>
+                <div class="relative z-10 text-center">
+                    <div class="w-20 h-20 mx-auto mb-4 bg-white/20 rounded-full flex items-center justify-center text-4xl">👨‍🏫</div>
+                    <h2 class="text-3xl font-bold mb-2">教师控制台</h2>
+                    <p class="text-indigo-200">创建房间 · 控制流程 · 查看实时数据</p>
+                </div>
+            </button>
+
+            <!-- 学生入口 -->
+            <button onclick="enterAsStudent()" class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 p-8 transition-all hover:scale-105 hover:shadow-2xl cooperate-glow">
+                <div class="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 transition-opacity"></div>
+                <div class="relative z-10 text-center">
+                    <div class="w-20 h-20 mx-auto mb-4 bg-white/20 rounded-full flex items-center justify-center text-4xl">🎓</div>
+                    <h2 class="text-3xl font-bold mb-2">学生参与</h2>
+                    <p class="text-emerald-200">加入房间 · 匿名选择 · 获取平时分</p>
+                </div>
+            </button>
+        </div>
+
+        <div class="mt-12 glass rounded-xl p-6 max-w-2xl text-center">
+            <h3 class="text-lg font-semibold mb-3 text-indigo-300">博弈规则说明</h3>
+            <div class="grid grid-cols-2 gap-4 text-sm text-slate-300">
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <span class="text-green-400 font-bold">双方合作</span><br>
+                    各得 3 分平时分
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <span class="text-red-400 font-bold">双方背叛</span><br>
+                    各得 1 分平时分
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <span class="text-yellow-400 font-bold">你合作，对方背叛</span><br>
+                    你得 0 分，对方得 5 分
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <span class="text-blue-400 font-bold">你背叛，对方合作</span><br>
+                    你得 5 分，对方得 0 分
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 教师控制台 -->
+    <div id="teacher-panel" class="hidden relative z-10 min-h-screen p-4 md:p-8">
+        <!-- 创建房间界面 -->
+        <div id="create-room-view" class="max-w-2xl mx-auto pt-10">
+            <button onclick="backToRole()" class="mb-6 text-slate-400 hover:text-white flex items-center gap-2 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                返回
+            </button>
+            
+            <div class="glass rounded-3xl p-8 md:p-12">
+                <h2 class="text-4xl font-bold mb-8 text-center">创建博弈房间</h2>
+                
+                <div class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">房间名称</label>
+                        <input type="text" id="room-name" placeholder="例如：经济学原理第3班" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">限时（秒）</label>
+                            <input type="number" id="time-limit" value="60" min="10" max="300" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">目标参与人数</label>
+                            <input type="number" id="target-players" value="30" min="2" max="200" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+
+                    <div class="bg-indigo-900/30 rounded-xl p-4 border border-indigo-500/30">
+                        <h4 class="font-semibold text-indigo-300 mb-2 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z"></path></svg>
+                            计分规则预览
+                        </h4>
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div class="flex justify-between"><span class="text-slate-400">合作 vs 合作：</span><span class="text-green-400 font-mono">+3 / +3</span></div>
+                            <div class="flex justify-between"><span class="text-slate-400">背叛 vs 背叛：</span><span class="text-red-400 font-mono">+1 / +1</span></div>
+                            <div class="flex justify-between"><span class="text-slate-400">合作 vs 背叛：</span><span class="text-yellow-400 font-mono">0 / +5</span></div>
+                            <div class="flex justify-between"><span class="text-slate-400">背叛 vs 合作：</span><span class="text-blue-400 font-mono">+5 / 0</span></div>
+                        </div>
+                    </div>
+
+                    <button onclick="createRoom()" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl transition-all transform hover:scale-[1.02] shadow-lg shadow-indigo-500/25">
+                        创建房间并生成大屏幕
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 控制面板（游戏进行中） -->
+        <div id="control-dashboard" class="hidden max-w-7xl mx-auto">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold" id="dashboard-room-name">房间名称</h2>
+                    <p class="text-slate-400 mt-1">房间代码: <span id="room-code-display" class="font-mono text-indigo-400 text-xl tracking-wider"></span></p>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="resetGame()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm">重置</button>
+                    <button onclick="backToRole()" class="px-4 py-2 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors text-sm">退出</button>
+                </div>
+            </div>
+
+            <div class="grid lg:grid-cols-3 gap-6">
+                <!-- 左侧：控制与状态 -->
+                <div class="space-y-6">
+                    <!-- 倒计时控制 -->
+                    <div class="glass rounded-2xl p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-indigo-300">倒计时</h3>
+                            <span id="timer-display" class="text-4xl font-mono font-bold text-white">60</span>
+                        </div>
+                        <div class="w-full bg-slate-700 rounded-full h-3 mb-4 overflow-hidden">
+                            <div id="timer-bar" class="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full progress-bar" style="width: 100%"></div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="start-btn" onclick="startGame()" class="flex-1 bg-green-600 hover:bg-green-500 py-2 rounded-lg font-semibold transition-colors">开始</button>
+                            <button onclick="pauseGame()" class="flex-1 bg-yellow-600 hover:bg-yellow-500 py-2 rounded-lg font-semibold transition-colors">暂停</button>
+                            <button onclick="stopGame()" class="flex-1 bg-red-600 hover:bg-red-500 py-2 rounded-lg font-semibold transition-colors">结束</button>
+                        </div>
+                    </div>
+
+                    <!-- 实时统计 -->
+                    <div class="glass rounded-2xl p-6">
+                        <h3 class="text-lg font-semibold mb-4 text-indigo-300">实时统计</h3>
+                        <div class="space-y-4">
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">已参与</span>
+                                <span id="participated-count" class="text-2xl font-bold text-white">0</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">选择合作</span>
+                                <span id="cooperate-count" class="text-2xl font-bold text-green-400">0</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">选择背叛</span>
+                                <span id="betray-count" class="text-2xl font-bold text-red-400">0</span>
+                            </div>
+                            <div class="h-px bg-slate-700 my-2"></div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">合作率</span>
+                                <span id="cooperate-rate" class="text-xl font-bold text-indigo-400">0%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 二维码/链接 -->
+                    <div class="glass rounded-2xl p-6 text-center">
+                        <h3 class="text-lg font-semibold mb-3 text-indigo-300">学生入口</h3>
+                        <div class="bg-white p-3 rounded-xl inline-block mb-3">
+                            <div class="w-32 h-32 bg-slate-900 rounded-lg flex items-center justify-center text-xs text-slate-500">
+                                [二维码区域]<br>扫码加入
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-400 break-all" id="join-link">https://game.classroom/room/ABC123</p>
+                    </div>
+                </div>
+
+                <!-- 中间与右侧：大屏幕展示 -->
+                <div class="lg:col-span-2 space-y-6">
+                    <!-- 收益矩阵大屏 -->
+                    <div class="glass rounded-2xl p-8 relative overflow-hidden">
+                        <div class="absolute top-0 right-0 w-64 h-64 bg-indigo-600/20 rounded-full filter blur-3xl -mr-32 -mt-32"></div>
+                        
+                        <h3 class="text-2xl font-bold mb-6 text-center relative z-10">实时博弈矩阵</h3>
+                        
+                        <!-- 矩阵表格 -->
+                        <div class="relative z-10 max-w-lg mx-auto">
+                            <div class="grid grid-cols-3 gap-2 mb-2">
+                                <div class="col-span-1"></div>
+                                <div class="text-center py-2 bg-green-500/20 rounded-lg border border-green-500/30 text-green-300 font-semibold">
+                                    对方选择合作
+                                </div>
+                                <div class="text-center py-2 bg-red-500/20 rounded-lg border border-red-500/30 text-red-300 font-semibold">
+                                    对方选择背叛
+                                </div>
+                            </div>
+                            
+                            <!-- 你合作 -->
+                            <div class="grid grid-cols-3 gap-2 mb-2">
+                                <div class="flex items-center justify-center bg-green-500/20 rounded-lg border border-green-500/30 text-green-300 font-semibold px-4">
+                                    你选择合作
+                                </div>
+                                <div id="cell-cc" class="matrix-cell bg-slate-800/80 rounded-lg p-4 text-center border-2 border-green-500/50 relative overflow-hidden">
+                                    <div class="absolute inset-0 bg-green-500/10" id="fill-cc" style="height: 0%; transition: height 0.5s ease;"></div>
+                                    <div class="relative z-10">
+                                        <div class="text-3xl font-bold text-green-400 mb-1" id="num-cc">0</div>
+                                        <div class="text-xs text-slate-400">双方合作</div>
+                                        <div class="text-xs font-mono text-green-300 mt-1">+3 / +3</div>
+                                    </div>
+                                </div>
+                                <div id="cell-cb" class="matrix-cell bg-slate-800/80 rounded-lg p-4 text-center border-2 border-yellow-500/50 relative overflow-hidden">
+                                    <div class="absolute inset-0 bg-yellow-500/10" id="fill-cb" style="height: 0%; transition: height 0.5s ease;"></div>
+                                    <div class="relative z-10">
+                                        <div class="text-3xl font-bold text-yellow-400 mb-1" id="num-cb">0</div>
+                                        <div class="text-xs text-slate-400">你被背叛</div>
+                                        <div class="text-xs font-mono text-yellow-300 mt-1">0 / +5</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 你背叛 -->
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="flex items-center justify-center bg-red-500/20 rounded-lg border border-red-500/30 text-red-300 font-semibold px-4">
+                                    你选择背叛
+                                </div>
+                                <div id="cell-bc" class="matrix-cell bg-slate-800/80 rounded-lg p-4 text-center border-2 border-blue-500/50 relative overflow-hidden">
+                                    <div class="absolute inset-0 bg-blue-500/10" id="fill-bc" style="height: 0%; transition: height 0.5s ease;"></div>
+                                    <div class="relative z-10">
+                                        <div class="text-3xl font-bold text-blue-400 mb-1" id="num-bc">0</div>
+                                        <div class="text-xs text-slate-400">你背叛对方</div>
+                                        <div class="text-xs font-mono text-blue-300 mt-1">+5 / 0</div>
+                                    </div>
+                                </div>
+                                <div id="cell-bb" class="matrix-cell bg-slate-800/80 rounded-lg p-4 text-center border-2 border-red-500/50 relative overflow-hidden">
+                                    <div class="absolute inset-0 bg-red-500/10" id="fill-bb" style="height: 0%; transition: height 0.5s ease;"></div>
+                                    <div class="relative z-10">
+                                        <div class="text-3xl font-bold text-red-400 mb-1" id="num-bb">0</div>
+                                        <div class="text-xs text-slate-400">双方背叛</div>
+                                        <div class="text-xs font-mono text-red-300 mt-1">+1 / +1</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 动态分布条 -->
+                        <div class="mt-8 max-w-lg mx-auto">
+                            <div class="flex justify-between text-sm text-slate-400 mb-2">
+                                <span>合作倾向</span>
+                                <span>背叛倾向</span>
+                            </div>
+                            <div class="h-8 bg-slate-800 rounded-full overflow-hidden flex relative">
+                                <div id="bar-cooperate" class="h-full bg-gradient-to-r from-green-600 to-green-400 transition-all duration-500 flex items-center justify-center text-xs font-bold text-white" style="width: 50%">
+                                    <span id="bar-coop-text">50%</span>
+                                </div>
+                                <div id="bar-betray" class="h-full bg-gradient-to-r from-red-400 to-red-600 transition-all duration-500 flex items-center justify-center text-xs font-bold text-white" style="width: 50%">
+                                    <span id="bar-betray-text">50%</span>
+                                </div>
+                                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                    <div class="w-0.5 h-full bg-white/50"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 实时日志 -->
+                    <div class="glass rounded-2xl p-6 h-64 overflow-hidden flex flex-col">
+                        <h3 class="text-lg font-semibold mb-3 text-indigo-300 flex items-center gap-2">
+                            <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                            实时选择流
+                        </h3>
+                        <div id="activity-log" class="flex-1 overflow-y-auto space-y-2 text-sm font-mono">
+                            <div class="text-slate-500 italic">等待学生加入...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 结果展示页 -->
+        <div id="results-view" class="hidden max-w-4xl mx-auto pt-10">
+            <div class="glass rounded-3xl p-8 md:p-12 text-center">
+                <h2 class="text-4xl font-bold mb-2">博弈结束</h2>
+                <p class="text-slate-400 mb-8">Final Results</p>
+
+                <div class="grid md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-slate-800/50 rounded-2xl p-6 border border-green-500/30">
+                        <div class="text-5xl font-bold text-green-400 mb-2" id="final-coop">0</div>
+                        <div class="text-slate-400">合作人数</div>
+                    </div>
+                    <div class="bg-slate-800/50 rounded-2xl p-6 border border-red-500/30">
+                        <div class="text-5xl font-bold text-red-400 mb-2" id="final-betray">0</div>
+                        <div class="text-slate-400">背叛人数</div>
+                    </div>
+                    <div class="bg-slate-800/50 rounded-2xl p-6 border border-indigo-500/30">
+                        <div class="text-5xl font-bold text-indigo-400 mb-2" id="final-total">0</div>
+                        <div class="text-slate-400">总参与</div>
+                    </div>
+                </div>
+
+                <div class="bg-gradient-to-r from-indigo-900/50 to-purple-900/50 rounded-2xl p-6 mb-8 border border-indigo-500/30">
+                    <h3 class="text-xl font-bold mb-4 text-indigo-300">课堂分析</h3>
+                    <p id="analysis-text" class="text-lg text-slate-300 leading-relaxed">
+                        正在生成分析...
+                    </p>
+                </div>
+
+                <div class="flex gap-4 justify-center">
+                    <button onclick="downloadResults()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-semibold transition-colors flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        导出数据
+                    </button>
+                    <button onclick="resetGame()" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-semibold transition-colors">
+                        新的一轮
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 学生界面 -->
+    <div id="student-panel" class="hidden relative z-10 min-h-screen flex flex-col items-center justify-center p-4">
+        
+        <!-- 加入房间 -->
+        <div id="student-join" class="w-full max-w-md">
+            <button onclick="backToRole()" class="mb-6 text-slate-400 hover:text-white flex items-center gap-2 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                返回
+            </button>
+
+            <div class="glass rounded-3xl p-8">
+                <h2 class="text-3xl font-bold mb-6 text-center">加入博弈</h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">房间代码</label>
+                        <input type="text" id="join-code" placeholder="输入6位房间代码" maxlength="6" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-4 text-center text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all uppercase">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">昵称（匿名）</label>
+                        <input type="text" id="student-nickname" placeholder="可选，随机生成" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+
+                    <button onclick="joinRoom()" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-4 rounded-xl transition-all transform hover:scale-[1.02] shadow-lg shadow-emerald-500/25 mt-6">
+                        进入房间
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 等待游戏开始 -->
+        <div id="student-wait" class="hidden w-full max-w-md text-center">
+            <div class="glass rounded-3xl p-8 mb-6">
+                <div class="w-20 h-20 mx-auto mb-4 rounded-full border-4 border-emerald-500/30 border-t-emerald-500 animate-spin"></div>
+                <h3 class="text-2xl font-bold mb-2">等待教师开始...</h3>
+                <p class="text-slate-400">请留意大屏幕，游戏即将开始</p>
+            </div>
+            <div class="text-sm text-slate-500">
+                已连接至房间: <span id="wait-room-code" class="font-mono text-emerald-400"></span>
+            </div>
+        </div>
+
+        <!-- 游戏进行中的选择界面 -->
+        <div id="student-play" class="hidden w-full max-w-2xl">
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-800/50 border border-slate-700 mb-4">
+                    <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                    <span class="text-slate-300 font-mono">剩余时间: <span id="student-timer" class="text-2xl font-bold text-white">60</span>s</span>
+                </div>
+                <h2 class="text-3xl font-bold">做出你的选择</h2>
+                <p class="text-slate-400 mt-2">匿名投票 · 实时统计</p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- 合作按钮 -->
+                <button onclick="makeChoice('cooperate')" id="btn-cooperate" class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-green-600 to-emerald-700 p-8 transition-all hover:scale-105 active:scale-95 cooperate-glow h-64 flex flex-col items-center justify-center">
+                    <div class="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 transition-opacity"></div>
+                    <div class="text-6xl mb-4 group-hover:scale-110 transition-transform">🤝</div>
+                    <h3 class="text-3xl font-bold mb-2">合作</h3>
+                    <p class="text-green-200 text-center text-sm">信任对方，追求双赢</p>
+                    <div class="mt-4 text-xs bg-black/20 px-3 py-1 rounded-full">可能获得 3 分</div>
+                </button>
+
+                <!-- 背叛按钮 -->
+                <button onclick="makeChoice('betray')" id="btn-betray" class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-red-600 to-rose-700 p-8 transition-all hover:scale-105 active:scale-95 betray-glow h-64 flex flex-col items-center justify-center">
+                    <div class="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 transition-opacity"></div>
+                    <div class="text-6xl mb-4 group-hover:scale-110 transition-transform">🗡️</div>
+                    <h3 class="text-3xl font-bold mb-2">背叛</h3>
+                    <p class="text-red-200 text-center text-sm">保护自己，可能获利</p>
+                    <div class="mt-4 text-xs bg-black/20 px-3 py-1 rounded-full">可能获得 5 分或 1 分</div>
+                </button>
+            </div>
+
+            <div class="mt-8 glass rounded-xl p-4 text-center text-sm text-slate-400">
+                <p>💡 提示：如果双方都选择合作，各得3分；如果双方都选择背叛，各得1分。</p>
+            </div>
+        </div>
+
+        <!-- 已选择等待结果 -->
+        <div id="student-done" class="hidden w-full max-w-md text-center">
+            <div class="glass rounded-3xl p-8">
+                <div class="w-24 h-24 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-4xl" id="done-icon">
+                    🤝
+                </div>
+                <h3 class="text-2xl font-bold mb-2">选择已提交</h3>
+                <p class="text-slate-400 mb-4">你选择了 <span id="done-choice" class="font-bold text-emerald-400">合作</span></p>
+                <div class="w-full bg-slate-800 rounded-full h-2 mb-2">
+                    <div class="bg-emerald-500 h-full rounded-full animate-pulse" style="width: 100%"></div>
+                </div>
+                <p class="text-sm text-slate-500">等待其他学生和最终结果...</p>
+            </div>
+        </div>
+
+        <!-- 个人结果 -->
+        <div id="student-result" class="hidden w-full max-w-md">
+            <div class="glass rounded-3xl p-8 text-center">
+                <h3 class="text-2xl font-bold mb-6">本轮结果</h3>
+                
+                <div class="bg-slate-800/50 rounded-2xl p-6 mb-6 border border-slate-700">
+                    <div class="text-sm text-slate-400 mb-2">你的收益</div>
+                    <div class="text-5xl font-bold text-indigo-400 mb-2" id="personal-score">+3</div>
+                    <div class="text-sm text-slate-500">平时分</div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-6 text-sm">
+                    <div class="bg-slate-800/30 rounded-lg p-3">
+                        <div class="text-slate-400 mb-1">你的选择</div>
+                        <div id="result-my-choice" class="font-bold text-emerald-400">合作</div>
+                    </div>
+                    <div class="bg-slate-800/30 rounded-lg p-3">
+                        <div class="text-slate-400 mb-1">对方选择</div>
+                        <div id="result-opponent-choice" class="font-bold text-rose-400">背叛</div>
+                    </div>
+                </div>
+
+                <button onclick="backToRole()" class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-semibold transition-colors">
+                    退出房间
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化Socket连接
+        const socket = io();
+        
+        // 游戏状态
+        let gameState = {
+            role: null, // 'teacher' | 'student'
+            roomCode: null,
+            roomName: '',
+            timeLimit: 60,
+            timeRemaining: 60,
+            isRunning: false,
+            isPaused: false,
+            timer: null,
+            players: [],
+            choices: {}, // playerId -> 'cooperate' | 'betray'
+            myChoice: null,
+            myId: null
+        };
+        
+        // Socket连接状态监听
+        socket.on('connect', () => {
+            console.log('Socket连接成功');
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('Socket连接断开');
+        });
+        
+        // 教师端：学生加入事件
+        socket.on('player_joined', (student) => {
+            // 更新已参与人数
+            const participatedCount = document.getElementById('participated-count');
+            const currentCount = parseInt(participatedCount.textContent) || 0;
+            participatedCount.textContent = currentCount + 1;
+            
+            // 在实时日志区域添加新学生加入的提示信息
+            const log = document.getElementById('activity-log');
+            const entry = document.createElement('div');
+            const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+            entry.className = 'flex justify-between items-center py-1 border-b border-slate-800/50';
+            entry.innerHTML = `<span class="text-slate-500">[${time}]</span> <span class="text-indigo-400">${student.nickname} 加入房间</span>`;
+            log.insertBefore(entry, log.firstChild);
+            if (log.children.length > 20) log.removeChild(log.lastChild);
+        });
+        
+        // 游戏开始事件
+        socket.on('game_started', (data) => {
+            if (gameState.role === 'student') {
+                gameState.isRunning = true;
+                gameState.timeRemaining = data.timeLimit;
+                
+                // 隐藏等待界面，显示选择界面
+                document.getElementById('student-wait').classList.add('hidden');
+                document.getElementById('student-play').classList.remove('hidden');
+                
+                // 更新学生端倒计时
+                document.getElementById('student-timer').textContent = data.timeLimit;
+            }
+        });
+        
+        // 倒计时更新事件
+        socket.on('update_timer', (data) => {
+            if (gameState.role === 'student' && gameState.isRunning) {
+                gameState.timeRemaining = data.timeRemaining;
+                document.getElementById('student-timer').textContent = data.timeRemaining;
+            }
+        });
+        
+        // 游戏结束事件
+        socket.on('game_ended', () => {
+            if (gameState.role === 'student') {
+                gameState.isRunning = false;
+                
+                // 如果学生尚未提交选择，默认为背叛
+                if (!gameState.myChoice) {
+                    gameState.myChoice = 'betray';
+                }
+                
+                // 隐藏选择界面，显示结果等待界面
+                if (document.getElementById('student-play').classList.contains('hidden') === false) {
+                    document.getElementById('student-play').classList.add('hidden');
+                }
+                if (document.getElementById('student-done').classList.contains('hidden')) {
+                    document.getElementById('student-done').classList.remove('hidden');
+                }
+            }
+        });
+        
+        // 游戏结果事件
+        socket.on('game_result', (data) => {
+            if (gameState.role === 'student') {
+                // 显示个人结果
+                document.getElementById('student-done').classList.add('hidden');
+                document.getElementById('student-result').classList.remove('hidden');
+                
+                // 更新结果UI
+                document.getElementById('personal-score').textContent = '+' + data.score;
+                document.getElementById('result-my-choice').textContent = data.choice === 'cooperate' ? '合作' : '背叛';
+                document.getElementById('result-my-choice').className = data.choice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
+                
+                // 显示对手选择（基于整体比例）
+                const opponentChoice = data.cooperateCount > data.betrayCount ? 'cooperate' : 'betray';
+                document.getElementById('result-opponent-choice').textContent = opponentChoice === 'cooperate' ? '合作' : '背叛';
+                document.getElementById('result-opponent-choice').className = opponentChoice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
+            }
+        });
+        
+        // 教师端：仪表板更新事件
+        socket.on('update_dashboard', (data) => {
+            if (gameState.role === 'teacher') {
+                // 更新统计数据
+                document.getElementById('participated-count').textContent = data.totalPlayers;
+                document.getElementById('cooperate-count').textContent = data.cooperateCount;
+                document.getElementById('betray-count').textContent = data.betrayCount;
+                document.getElementById('cooperate-rate').textContent = data.totalPlayers > 0 ? Math.round((data.cooperateCount / data.totalPlayers) * 100) + '%' : '0%';
+                
+                // 更新矩阵和分布条
+                updateMatrix(data.totalPlayers, data.cooperateCount, data.betrayCount);
+            }
+        });
+
+        // 生成房间代码
+        function generateRoomCode() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+
+        // 角色选择
+        function enterAsTeacher() {
+            gameState.role = 'teacher';
+            document.getElementById('role-selection').classList.add('hidden');
+            document.getElementById('teacher-panel').classList.remove('hidden');
+            document.getElementById('create-room-view').classList.remove('hidden');
+        }
+
+        function enterAsStudent() {
+            gameState.role = 'student';
+            document.getElementById('role-selection').classList.add('hidden');
+            document.getElementById('student-panel').classList.remove('hidden');
+            document.getElementById('student-join').classList.remove('hidden');
+        }
+
+        function backToRole() {
+            // 清理状态
+            if (gameState.timer) clearInterval(gameState.timer);
+            gameState = {
+                role: null, roomCode: null, roomName: '', timeLimit: 60,
+                timeRemaining: 60, isRunning: false, isPaused: false,
+                timer: null, players: [], choices: {}, myChoice: null, myId: null
+            };
+            
+            // 重置UI
+            document.getElementById('teacher-panel').classList.add('hidden');
+            document.getElementById('student-panel').classList.add('hidden');
+            document.getElementById('role-selection').classList.remove('hidden');
+            
+            // 重置教师视图
+            document.getElementById('create-room-view').classList.remove('hidden');
+            document.getElementById('control-dashboard').classList.add('hidden');
+            document.getElementById('results-view').classList.add('hidden');
+            
+            // 重置学生视图
+            document.getElementById('student-join').classList.add('hidden');
+            document.getElementById('student-wait').classList.add('hidden');
+            document.getElementById('student-play').classList.add('hidden');
+            document.getElementById('student-done').classList.add('hidden');
+            document.getElementById('student-result').classList.add('hidden');
+        }
+
+        // 创建房间
+        function createRoom() {
+            const name = document.getElementById('room-name').value || '未命名房间';
+            const time = parseInt(document.getElementById('time-limit').value) || 60;
+            const targetPlayers = parseInt(document.getElementById('target-players').value) || 30;
+            
+            // 发送创建房间请求
+            socket.emit('create_room', {
+                roomName: name,
+                timeLimit: time,
+                targetPlayers: targetPlayers
+            }, (response) => {
+                if (response.success) {
+                    gameState.roomCode = response.roomCode;
+                    gameState.roomName = name;
+                    gameState.timeLimit = time;
+                    gameState.timeRemaining = time;
+                    
+                    // 更新UI
+                    document.getElementById('dashboard-room-name').textContent = name;
+                    document.getElementById('room-code-display').textContent = gameState.roomCode;
+                    document.getElementById('timer-display').textContent = time;
+                    
+                    // 生成真实的二维码链接
+                    const currentUrl = window.location.origin;
+                    const joinUrl = `${currentUrl}/?room=${gameState.roomCode}`;
+                    document.getElementById('join-link').textContent = joinUrl;
+                    
+                    // 生成二维码（使用第三方API）
+                    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=128x128&data=${encodeURIComponent(joinUrl)}`;
+                    const qrCodeElement = document.querySelector('#control-dashboard .bg-white.p-3 .w-32.h-32');
+                    qrCodeElement.innerHTML = `<img src="${qrCodeUrl}" alt="房间二维码" class="w-full h-full">`;
+                    
+                    // 切换视图
+                    document.getElementById('create-room-view').classList.add('hidden');
+                    document.getElementById('control-dashboard').classList.remove('hidden');
+                } else {
+                    alert('创建房间失败，请重试');
+                }
+            });
+        }
+
+        // 学生加入房间
+        function joinRoom() {
+            const code = document.getElementById('join-code').value.toUpperCase();
+            const nickname = document.getElementById('student-nickname').value || '匿名' + Math.floor(Math.random() * 1000);
+            
+            if (code.length !== 6) {
+                alert('请输入6位有效的房间代码');
+                return;
+            }
+            
+            // 发送加入房间请求
+            socket.emit('join_room', {
+                roomCode: code,
+                nickname: nickname
+            }, (response) => {
+                if (response.success) {
+                    gameState.roomCode = code;
+                    gameState.myId = socket.id;
+                    
+                    document.getElementById('student-join').classList.add('hidden');
+                    document.getElementById('student-wait').classList.remove('hidden');
+                    document.getElementById('wait-room-code').textContent = code;
+                } else {
+                    alert(response.error || '加入房间失败，请重试');
+                }
+            });
+        }
+
+        // 游戏控制
+        function startGame() {
+            if (gameState.isRunning) return;
+            
+            // 发送开始游戏请求
+            socket.emit('start_game', {
+                roomCode: gameState.roomCode
+            }, (response) => {
+                if (response.success) {
+                    gameState.isRunning = true;
+                    gameState.isPaused = false;
+                    document.getElementById('start-btn').disabled = true;
+                    document.getElementById('start-btn').classList.add('opacity-50');
+                    
+                    gameState.timer = setInterval(() => {
+                        if (!gameState.isPaused) {
+                            gameState.timeRemaining--;
+                            updateTimerUI();
+                            
+                            if (gameState.timeRemaining <= 0) {
+                                stopGame();
+                            }
+                        }
+                    }, 1000);
+                } else {
+                    alert('开始游戏失败，请重试');
+                }
+            });
+        }
+
+        function pauseGame() {
+            gameState.isPaused = !gameState.isPaused;
+        }
+
+        function stopGame() {
+            // 发送结束游戏请求
+            socket.emit('stop_game', {
+                roomCode: gameState.roomCode
+            }, (response) => {
+                if (response.success) {
+                    if (gameState.timer) clearInterval(gameState.timer);
+                    gameState.isRunning = false;
+                    gameState.isPaused = false;
+                    
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('start-btn').classList.remove('opacity-50');
+                    
+                    showResults();
+                } else {
+                    alert('结束游戏失败，请重试');
+                }
+            });
+        }
+
+        function resetGame() {
+            if (gameState.timer) clearInterval(gameState.timer);
+            
+            gameState.timeRemaining = gameState.timeLimit;
+            gameState.isRunning = false;
+            gameState.isPaused = false;
+            gameState.choices = {};
+            gameState.players = [];
+            
+            // 重置UI
+            document.getElementById('results-view').classList.add('hidden');
+            document.getElementById('control-dashboard').classList.remove('hidden');
+            document.getElementById('timer-display').textContent = gameState.timeLimit;
+            document.getElementById('timer-bar').style.width = '100%';
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('start-btn').classList.remove('opacity-50');
+            
+            // 重置统计
+            updateStats();
+            document.getElementById('activity-log').innerHTML = '<div class="text-slate-500 italic">等待学生加入...</div>';
+        }
+
+        function updateTimerUI() {
+            const percentage = (gameState.timeRemaining / gameState.timeLimit) * 100;
+            document.getElementById('timer-display').textContent = gameState.timeRemaining;
+            document.getElementById('timer-bar').style.width = percentage + '%';
+            
+            if (percentage < 20) {
+                document.getElementById('timer-bar').classList.remove('from-indigo-500', 'to-purple-500');
+                document.getElementById('timer-bar').classList.add('from-red-500', 'to-orange-500');
+            }
+        }
+
+        // 学生做出选择
+        function makeChoice(choice) {
+            if (!gameState.isRunning) return;
+            
+            // 发送选择提交请求
+            socket.emit('submit_choice', {
+                roomCode: gameState.roomCode,
+                choice: choice
+            }, (response) => {
+                if (response.success) {
+                    gameState.myChoice = choice;
+                    gameState.choices[gameState.myId] = choice;
+                    
+                    // 禁用按钮
+                    document.getElementById('btn-cooperate').disabled = true;
+                    document.getElementById('btn-betray').disabled = true;
+                    document.getElementById('btn-cooperate').classList.add('opacity-50');
+                    document.getElementById('btn-betray').classList.add('opacity-50');
+                    
+                    // 显示已选择
+                    document.getElementById('student-play').classList.add('hidden');
+                    document.getElementById('student-done').classList.remove('hidden');
+                    
+                    const choiceText = choice === 'cooperate' ? '合作' : '背叛';
+                    const choiceColor = choice === 'cooperate' ? 'text-emerald-400' : 'text-rose-400';
+                    const icon = choice === 'cooperate' ? '🤝' : '🗡️';
+                    
+                    document.getElementById('done-choice').textContent = choiceText;
+                    document.getElementById('done-choice').className = `font-bold ${choiceColor}`;
+                    document.getElementById('done-icon').textContent = icon;
+                } else {
+                    alert('提交选择失败，请重试');
+                }
+            });
+        }
+
+        // 更新统计
+        function updateStats() {
+            const choices = Object.values(gameState.choices);
+            const total = choices.length;
+            const cooperate = choices.filter(c => c === 'cooperate').length;
+            const betray = choices.filter(c => c === 'betray').length;
+            
+            document.getElementById('participated-count').textContent = total;
+            document.getElementById('cooperate-count').textContent = cooperate;
+            document.getElementById('betray-count').textContent = betray;
+            document.getElementById('cooperate-rate').textContent = total > 0 ? Math.round((cooperate / total) * 100) + '%' : '0%';
+            
+            // 更新矩阵（简化模型：假设随机配对）
+            updateMatrix(total, cooperate, betray);
+            
+            // 更新分布条
+            if (total > 0) {
+                const coopPercent = (cooperate / total) * 100;
+                const betrayPercent = (betray / total) * 100;
+                document.getElementById('bar-cooperate').style.width = coopPercent + '%';
+                document.getElementById('bar-betray').style.width = betrayPercent + '%';
+                document.getElementById('bar-coop-text').textContent = Math.round(coopPercent) + '%';
+                document.getElementById('bar-betray-text').textContent = Math.round(betrayPercent) + '%';
+            }
+        }
+
+        function updateMatrix(total, cooperate, betray) {
+            if (total === 0) return;
+            
+            // 简化计算：假设配对是随机的
+            const coopRate = cooperate / total;
+            const betrayRate = betray / total;
+            
+            // 预期各单元格数量
+            const cc = Math.round(total * coopRate * coopRate); // 双方都合作
+            const cb = Math.round(total * coopRate * betrayRate); // 我合作对方背叛
+            const bc = Math.round(total * betrayRate * coopRate); // 我背叛对方合作
+            const bb = Math.round(total * betrayRate * betrayRate); // 双方都背叛
+            
+            // 更新数字
+            document.getElementById('num-cc').textContent = cc;
+            document.getElementById('num-cb').textContent = cb;
+            document.getElementById('num-bc').textContent = bc;
+            document.getElementById('num-bb').textContent = bb;
+            
+            // 更新填充高度（相对最大值）
+            const max = Math.max(cc, cb, bc, bb, 1);
+            document.getElementById('fill-cc').style.height = (cc / max * 100) + '%';
+            document.getElementById('fill-cb').style.height = (cb / max * 100) + '%';
+            document.getElementById('fill-bc').style.height = (bc / max * 100) + '%';
+            document.getElementById('fill-bb').style.height = (bb / max * 100) + '%';
+        }
+
+        // 显示结果
+        function showResults() {
+            document.getElementById('control-dashboard').classList.add('hidden');
+            document.getElementById('results-view').classList.remove('hidden');
+            
+            const choices = Object.values(gameState.choices);
+            const total = choices.length;
+            const cooperate = choices.filter(c => c === 'cooperate').length;
+            const betray = choices.filter(c => c === 'betray').length;
+            
+            document.getElementById('final-coop').textContent = cooperate;
+            document.getElementById('final-betray').textContent = betray;
+            document.getElementById('final-total').textContent = total;
+            
+            // 生成分析文本
+            const coopRate = total > 0 ? (cooperate / total) : 0;
+            let analysis = '';
+            if (coopRate > 0.6) {
+                analysis = `本班表现出较高的合作倾向（${Math.round(coopRate * 100)}%选择合作）。这体现了集体理性，虽然个体面临被背叛的风险，但大多数人选择了信任。在重复博弈中，这种策略可能带来长期收益。`;
+            } else if (coopRate < 0.4) {
+                analysis = `本班表现出较高的竞争倾向（${Math.round((1-coopRate) * 100)}%选择背叛）。这反映了"囚徒困境"中的个体理性选择——在不知道对方选择的情况下，背叛是占优策略。但结果是集体次优（大家都只得1分而非3分）。`;
+            } else {
+                analysis = `本班选择相对均衡（合作${Math.round(coopRate * 100)}% vs 背叛${Math.round((1-coopRate) * 100)}%）。这种混合策略在一次性博弈中可能达到纳什均衡。建议讨论：是什么因素影响了你的选择？信任还是自保？`;
+            }
+            document.getElementById('analysis-text').textContent = analysis;
+            
+            // 如果是学生，显示个人结果
+            if (gameState.role === 'student' && gameState.myChoice) {
+                setTimeout(() => {
+                    document.getElementById('student-done').classList.add('hidden');
+                    document.getElementById('student-result').classList.remove('hidden');
+                    
+                    // 模拟对手选择（随机）
+                    const opponentChoice = Math.random() > 0.5 ? 'cooperate' : 'betray';
+                    let score = 0;
+                    
+                    if (gameState.myChoice === 'cooperate' && opponentChoice === 'cooperate') score = 3;
+                    else if (gameState.myChoice === 'cooperate' && opponentChoice === 'betray') score = 0;
+                    else if (gameState.myChoice === 'betray' && opponentChoice === 'cooperate') score = 5;
+                    else score = 1;
+                    
+                    document.getElementById('personal-score').textContent = '+' + score;
+                    document.getElementById('result-my-choice').textContent = gameState.myChoice === 'cooperate' ? '合作' : '背叛';
+                    document.getElementById('result-my-choice').className = gameState.myChoice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
+                    document.getElementById('result-opponent-choice').textContent = opponentChoice === 'cooperate' ? '合作' : '背叛';
+                    document.getElementById('result-opponent-choice').className = opponentChoice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
+                }, 2000);
+            }
+        }
+
+
+
+
+
+
+
+        function downloadResults() {
+            const data = {
+                room: gameState.roomName,
+                code: gameState.roomCode,
+                total: Object.keys(gameState.choices).length,
+                cooperate: Object.values(gameState.choices).filter(c => c === 'cooperate').length,
+                betray: Object.values(gameState.choices).filter(c => c === 'betray').length,
+                timestamp: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `博弈结果_${gameState.roomCode}_${Date.now()}.json`;
+            a.click();
+        }
+
+        // 键盘快捷键
+        document.addEventListener('keydown', (e) => {
+            if (gameState.role === 'student' && gameState.isRunning) {
+                if (e.key === '1') makeChoice('cooperate');
+                if (e.key === '2') makeChoice('betray');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "prisoners-dilemma",
+  "version": "1.0.0",
+  "description": "WebSocket-based classroom interaction tool for Prisoner's Dilemma",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "websocket",
+    "classroom",
+    "interaction",
+    "prisoners-dilemma"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  }
+}
