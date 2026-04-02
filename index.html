@@ -642,6 +642,55 @@
                 updateMatrix(data.totalPlayers, data.cooperateCount, data.betrayCount);
             }
         });
+        
+        // 游戏重置事件
+        socket.on('room_reset', () => {
+            if (gameState.role === 'student') {
+                // 学生端：隐藏结果页，显示等待界面
+                document.getElementById('student-result').classList.add('hidden');
+                document.getElementById('student-done').classList.add('hidden');
+                document.getElementById('student-wait').classList.remove('hidden');
+                
+                // 重置本地游戏状态
+                gameState.isRunning = false;
+                gameState.myChoice = null;
+                gameState.choices = {};
+            } else if (gameState.role === 'teacher') {
+                // 教师端：重置UI
+                document.getElementById('timer-display').textContent = gameState.timeLimit;
+                document.getElementById('timer-bar').style.width = '100%';
+                document.getElementById('timer-bar').classList.remove('from-red-500', 'to-orange-500');
+                document.getElementById('timer-bar').classList.add('from-indigo-500', 'to-purple-500');
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('start-btn').classList.remove('opacity-50');
+                
+                // 重置统计
+                updateStats();
+                document.getElementById('activity-log').innerHTML = '<div class="text-slate-500 italic">等待学生加入...</div>';
+            }
+        });
+        
+        // 游戏结束事件（教师端）
+        socket.on('game_ended', (data) => {
+            if (gameState.role === 'teacher' && data) {
+                // 更新结果页数据
+                document.getElementById('final-coop').textContent = data.cooperateCount;
+                document.getElementById('final-betray').textContent = data.betrayCount;
+                document.getElementById('final-total').textContent = data.totalPlayers;
+                
+                // 生成分析文本
+                const coopRate = data.totalPlayers > 0 ? (data.cooperateCount / data.totalPlayers) : 0;
+                let analysis = '';
+                if (coopRate > 0.6) {
+                    analysis = `本班表现出较高的合作倾向（${Math.round(coopRate * 100)}%选择合作）。这体现了集体理性，虽然个体面临被背叛的风险，但大多数人选择了信任。在重复博弈中，这种策略可能带来长期收益。`;
+                } else if (coopRate < 0.4) {
+                    analysis = `本班表现出较高的竞争倾向（${Math.round((1-coopRate) * 100)}%选择背叛）。这反映了"囚徒困境"中的个体理性选择——在不知道对方选择的情况下，背叛是占优策略。但结果是集体次优（大家都只得1分而非3分）。`;
+                } else {
+                    analysis = `本班选择相对均衡（合作${Math.round(coopRate * 100)}% vs 背叛${Math.round((1-coopRate) * 100)}%）。这种混合策略在一次性博弈中可能达到纳什均衡。建议讨论：是什么因素影响了你的选择？信任还是自保？`;
+                }
+                document.getElementById('analysis-text').textContent = analysis;
+            }
+        });
 
         // 生成房间代码
         function generateRoomCode() {
@@ -815,25 +864,34 @@
         }
 
         function resetGame() {
-            if (gameState.timer) clearInterval(gameState.timer);
-            
-            gameState.timeRemaining = gameState.timeLimit;
-            gameState.isRunning = false;
-            gameState.isPaused = false;
-            gameState.choices = {};
-            gameState.players = [];
-            
-            // 重置UI
-            document.getElementById('results-view').classList.add('hidden');
-            document.getElementById('control-dashboard').classList.remove('hidden');
-            document.getElementById('timer-display').textContent = gameState.timeLimit;
-            document.getElementById('timer-bar').style.width = '100%';
-            document.getElementById('start-btn').disabled = false;
-            document.getElementById('start-btn').classList.remove('opacity-50');
-            
-            // 重置统计
-            updateStats();
-            document.getElementById('activity-log').innerHTML = '<div class="text-slate-500 italic">等待学生加入...</div>';
+            // 发送重置游戏请求
+            socket.emit('reset_round', {
+                roomCode: gameState.roomCode
+            }, (response) => {
+                if (response.success) {
+                    if (gameState.timer) clearInterval(gameState.timer);
+                    
+                    gameState.timeRemaining = gameState.timeLimit;
+                    gameState.isRunning = false;
+                    gameState.isPaused = false;
+                    gameState.choices = {};
+                    gameState.players = [];
+                    
+                    // 重置UI
+                    document.getElementById('results-view').classList.add('hidden');
+                    document.getElementById('control-dashboard').classList.remove('hidden');
+                    document.getElementById('timer-display').textContent = gameState.timeLimit;
+                    document.getElementById('timer-bar').style.width = '100%';
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('start-btn').classList.remove('opacity-50');
+                    
+                    // 重置统计
+                    updateStats();
+                    document.getElementById('activity-log').innerHTML = '<div class="text-slate-500 italic">等待学生加入...</div>';
+                } else {
+                    alert('重置游戏失败，请重试');
+                }
+            });
         }
 
         function updateTimerUI() {
@@ -941,49 +999,7 @@
             document.getElementById('control-dashboard').classList.add('hidden');
             document.getElementById('results-view').classList.remove('hidden');
             
-            const choices = Object.values(gameState.choices);
-            const total = choices.length;
-            const cooperate = choices.filter(c => c === 'cooperate').length;
-            const betray = choices.filter(c => c === 'betray').length;
-            
-            document.getElementById('final-coop').textContent = cooperate;
-            document.getElementById('final-betray').textContent = betray;
-            document.getElementById('final-total').textContent = total;
-            
-            // 生成分析文本
-            const coopRate = total > 0 ? (cooperate / total) : 0;
-            let analysis = '';
-            if (coopRate > 0.6) {
-                analysis = `本班表现出较高的合作倾向（${Math.round(coopRate * 100)}%选择合作）。这体现了集体理性，虽然个体面临被背叛的风险，但大多数人选择了信任。在重复博弈中，这种策略可能带来长期收益。`;
-            } else if (coopRate < 0.4) {
-                analysis = `本班表现出较高的竞争倾向（${Math.round((1-coopRate) * 100)}%选择背叛）。这反映了"囚徒困境"中的个体理性选择——在不知道对方选择的情况下，背叛是占优策略。但结果是集体次优（大家都只得1分而非3分）。`;
-            } else {
-                analysis = `本班选择相对均衡（合作${Math.round(coopRate * 100)}% vs 背叛${Math.round((1-coopRate) * 100)}%）。这种混合策略在一次性博弈中可能达到纳什均衡。建议讨论：是什么因素影响了你的选择？信任还是自保？`;
-            }
-            document.getElementById('analysis-text').textContent = analysis;
-            
-            // 如果是学生，显示个人结果
-            if (gameState.role === 'student' && gameState.myChoice) {
-                setTimeout(() => {
-                    document.getElementById('student-done').classList.add('hidden');
-                    document.getElementById('student-result').classList.remove('hidden');
-                    
-                    // 模拟对手选择（随机）
-                    const opponentChoice = Math.random() > 0.5 ? 'cooperate' : 'betray';
-                    let score = 0;
-                    
-                    if (gameState.myChoice === 'cooperate' && opponentChoice === 'cooperate') score = 3;
-                    else if (gameState.myChoice === 'cooperate' && opponentChoice === 'betray') score = 0;
-                    else if (gameState.myChoice === 'betray' && opponentChoice === 'cooperate') score = 5;
-                    else score = 1;
-                    
-                    document.getElementById('personal-score').textContent = '+' + score;
-                    document.getElementById('result-my-choice').textContent = gameState.myChoice === 'cooperate' ? '合作' : '背叛';
-                    document.getElementById('result-my-choice').className = gameState.myChoice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
-                    document.getElementById('result-opponent-choice').textContent = opponentChoice === 'cooperate' ? '合作' : '背叛';
-                    document.getElementById('result-opponent-choice').className = opponentChoice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
-                }, 2000);
-            }
+            // 数据将通过server.js发送的game_ended事件更新
         }
 
 

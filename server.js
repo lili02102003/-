@@ -222,6 +222,38 @@ io.on('connection', (socket) => {
     callback({ success: true });
   });
   
+  // 重置新一轮游戏
+  socket.on('reset_round', (data, callback) => {
+    const { roomCode } = data;
+    
+    if (!rooms[roomCode]) {
+      callback({ success: false, error: '房间不存在' });
+      return;
+    }
+    
+    const room = rooms[roomCode];
+    
+    // 清空选择记录
+    room.choices = {};
+    
+    // 重置游戏状态
+    room.status = 'waiting';
+    
+    // 停止计时器（如果正在运行）
+    if (room.timer) {
+      clearInterval(room.timer);
+      room.timer = null;
+    }
+    
+    console.log(`游戏重置: ${roomCode} - ${room.name}`);
+    
+    // 向房间内所有客户端广播游戏重置事件
+    io.to(roomCode).emit('room_reset');
+    
+    // 向教师端发送成功响应
+    callback({ success: true });
+  });
+  
   // 监听客户端断开连接事件
   socket.on('disconnect', () => {
     console.log('客户端已断开连接:', socket.id);
@@ -235,8 +267,33 @@ io.on('connection', (socket) => {
         room.students.splice(studentIndex, 1);
         console.log(`学生离开房间: ${roomCode} - ${student.nickname}`);
         
+        // 删除该学生的选择记录
+        if (room.choices[socket.id]) {
+          delete room.choices[socket.id];
+        }
+        
         // 向教师端发送学生离开事件
         io.to(room.teacherSocketId).emit('player_left', student);
+        
+        // 重新计算并发送更新数据
+        const actualPlayers = Object.keys(room.choices).length;
+        let cooperateCount = 0;
+        
+        for (const choice of Object.values(room.choices)) {
+          if (choice === 'cooperate') {
+            cooperateCount++;
+          }
+        }
+        
+        const betrayCount = actualPlayers - cooperateCount;
+        
+        // 向教师端发送更新数据
+        io.to(room.teacherSocketId).emit('update_dashboard', {
+          totalPlayers: actualPlayers,
+          cooperateCount: cooperateCount,
+          betrayCount: betrayCount
+        });
+        
         break;
       }
     }
@@ -272,39 +329,56 @@ function calculateResults(roomCode) {
   if (!room) return;
   
   const choices = room.choices;
-  const totalPlayers = room.students.length;
-  
-  // 计算合作和背叛的人数
-  let cooperateCount = 0;
-  let betrayCount = 0;
-  
-  for (const choice of Object.values(choices)) {
-    if (choice === 'cooperate') {
-      cooperateCount++;
-    } else {
-      betrayCount++;
-    }
-  }
+  const totalStudents = room.students.length;
   
   // 为未提交选择的学生默认为背叛
   for (const student of room.students) {
     if (!choices[student.id]) {
       choices[student.id] = 'betray';
-      betrayCount++;
     }
   }
+  
+  // 计算实际参与人数和合作人数
+  const actualPlayers = Object.keys(choices).length;
+  let cooperateCount = 0;
+  
+  for (const choice of Object.values(choices)) {
+    if (choice === 'cooperate') {
+      cooperateCount++;
+    }
+  }
+  
+  const betrayCount = actualPlayers - cooperateCount;
   
   // 计算每个学生的得分
   for (const student of room.students) {
     const studentChoice = choices[student.id] || 'betray';
     let score = 0;
     
-    if (studentChoice === 'cooperate') {
-      // 合作的得分 = 3 * 合作率 + 0 * 背叛率
-      score = Math.round(3 * (cooperateCount / totalPlayers) + 0 * (betrayCount / totalPlayers));
+    if (actualPlayers === 1) {
+      // 单人游戏，得0分
+      score = 0;
+    } else if (actualPlayers === 2) {
+      // 双人游戏，使用经典矩阵
+      const otherChoice = Object.values(choices).find(c => c !== studentChoice) || 'betray';
+      if (studentChoice === 'cooperate' && otherChoice === 'cooperate') {
+        score = 3;
+      } else if (studentChoice === 'cooperate' && otherChoice === 'betray') {
+        score = 0;
+      } else if (studentChoice === 'betray' && otherChoice === 'cooperate') {
+        score = 5;
+      } else {
+        score = 1;
+      }
     } else {
-      // 背叛的得分 = 5 * 合作率 + 1 * 背叛率
-      score = Math.round(5 * (cooperateCount / totalPlayers) + 1 * (betrayCount / totalPlayers));
+      // 多人游戏，使用平均期望模型
+      if (studentChoice === 'cooperate') {
+        // 合作的得分 = ((C-1)*3 + (N-C)*0) / (N-1)
+        score = Math.round(((cooperateCount - 1) * 3 + (actualPlayers - cooperateCount) * 0) / (actualPlayers - 1));
+      } else {
+        // 背叛的得分 = (C*5 + (N-C-1)*1) / (N-1)
+        score = Math.round((cooperateCount * 5 + (actualPlayers - cooperateCount - 1) * 1) / (actualPlayers - 1));
+      }
     }
     
     // 向学生发送个人得分
@@ -318,7 +392,14 @@ function calculateResults(roomCode) {
   
   // 向教师端发送统计数据
   io.to(room.teacherSocketId).emit('update_dashboard', {
-    totalPlayers: totalPlayers,
+    totalPlayers: actualPlayers,
+    cooperateCount: cooperateCount,
+    betrayCount: betrayCount
+  });
+  
+  // 向教师端发送游戏结束事件，包含统计数据
+  io.to(room.teacherSocketId).emit('game_ended', {
+    totalPlayers: actualPlayers,
     cooperateCount: cooperateCount,
     betrayCount: betrayCount
   });
