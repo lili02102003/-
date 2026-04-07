@@ -157,7 +157,7 @@
                         <input type="text" id="room-name" placeholder="例如：经济学原理第3班" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all">
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-3 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">限时（秒）</label>
                             <input type="number" id="time-limit" value="60" min="10" max="300" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500">
@@ -165,6 +165,10 @@
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">目标参与人数</label>
                             <input type="number" id="target-players" value="30" min="2" max="200" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">博弈轮数</label>
+                            <input type="number" id="total-rounds" value="1" min="1" max="10" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500">
                         </div>
                     </div>
 
@@ -194,6 +198,7 @@
                 <div>
                     <h2 class="text-3xl font-bold" id="dashboard-room-name">房间名称</h2>
                     <p class="text-slate-400 mt-1">房间代码: <span id="room-code-display" class="font-mono text-indigo-400 text-xl tracking-wider"></span></p>
+                    <p class="text-slate-400 mt-1">当前进度：第<span id="current-round" class="font-mono text-indigo-400">1</span>/<span id="total-rounds" class="font-mono text-indigo-400">1</span>轮</p>
                 </div>
                 <div class="flex gap-3">
                     <button onclick="resetGame()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm">重置</button>
@@ -228,18 +233,18 @@
                                 <span class="text-slate-400">已参与</span>
                                 <span id="participated-count" class="text-2xl font-bold text-white">0</span>
                             </div>
-                            <div class="flex justify-between items-center">
-                                <span class="text-slate-400">选择合作</span>
-                                <span id="cooperate-count" class="text-2xl font-bold text-green-400">0</span>
-                            </div>
-                            <div class="flex justify-between items-center">
-                                <span class="text-slate-400">选择背叛</span>
-                                <span id="betray-count" class="text-2xl font-bold text-red-400">0</span>
-                            </div>
                             <div class="h-px bg-slate-700 my-2"></div>
                             <div class="flex justify-between items-center">
-                                <span class="text-slate-400">合作率</span>
-                                <span id="cooperate-rate" class="text-xl font-bold text-indigo-400">0%</span>
+                                <span class="text-slate-400">双人合作(CC)组数</span>
+                                <span id="cc-count" class="text-2xl font-bold text-green-400">0</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">双人背叛(BB)组数</span>
+                                <span id="bb-count" class="text-2xl font-bold text-red-400">0</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">一人合作一人背叛(CB)组数</span>
+                                <span id="cb-count" class="text-2xl font-bold text-yellow-400">0</span>
                             </div>
                         </div>
                     </div>
@@ -385,13 +390,16 @@
                     </p>
                 </div>
 
-                <div class="flex gap-4 justify-center">
+                <div class="flex gap-4 justify-center" id="result-buttons">
                     <button onclick="downloadResults()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-semibold transition-colors flex items-center gap-2">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                         导出数据
                     </button>
-                    <button onclick="resetGame()" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-semibold transition-colors">
-                        新的一轮
+                    <button onclick="nextRound()" id="next-round-btn" class="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-xl font-semibold transition-colors">
+                        进入下一轮
+                    </button>
+                    <button onclick="showGlobalAnalysis()" id="global-analysis-btn" class="px-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-semibold transition-colors hidden">
+                        查看全局分析
                     </button>
                 </div>
             </div>
@@ -521,6 +529,49 @@
         </div>
     </div>
 
+    <!-- 全局分析面板 -->
+    <div id="global-analysis" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+        <div class="glass rounded-3xl p-8 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold">全局分析</h2>
+                <button onclick="hideGlobalAnalysis()" class="text-slate-400 hover:text-white transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            
+            <div class="space-y-6">
+                <div>
+                    <h3 class="text-xl font-semibold mb-4 text-indigo-300">每轮统计数据</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-700">
+                                    <th class="py-3 px-4 text-left">轮次</th>
+                                    <th class="py-3 px-4 text-left">双人合作(CC)组数</th>
+                                    <th class="py-3 px-4 text-left">双人背叛(BB)组数</th>
+                                    <th class="py-3 px-4 text-left">一人合作一人背叛(CB)组数</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body">
+                                <!-- 数据将通过JavaScript动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 class="text-xl font-semibold mb-4 text-indigo-300">趋势分析</h3>
+                    <div class="bg-slate-800/50 rounded-xl p-4 h-64" id="trend-chart">
+                        <!-- 趋势图表将通过JavaScript动态生成 -->
+                        <div class="flex items-center justify-center h-full text-slate-500">
+                            趋势图表加载中...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // 初始化Socket连接
         const socket = io();
@@ -538,7 +589,10 @@
             players: [],
             choices: {}, // playerId -> 'cooperate' | 'betray'
             myChoice: null,
-            myId: null
+            myId: null,
+            totalRounds: 1,
+            currentRound: 1,
+            history: []
         };
         
         // Socket连接状态监听
@@ -622,24 +676,53 @@
                 document.getElementById('result-my-choice').textContent = data.choice === 'cooperate' ? '合作' : '背叛';
                 document.getElementById('result-my-choice').className = data.choice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
                 
-                // 显示对手选择（基于整体比例）
-                const opponentChoice = data.cooperateCount > data.betrayCount ? 'cooperate' : 'betray';
-                document.getElementById('result-opponent-choice').textContent = opponentChoice === 'cooperate' ? '合作' : '背叛';
-                document.getElementById('result-opponent-choice').className = opponentChoice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
+                // 显示对手选择
+                let opponentText = data.opponentChoice === 'cooperate' ? '合作' : '背叛';
+                if (data.isBotMatch) {
+                    opponentText += ' (虚拟对手)';
+                }
+                document.getElementById('result-opponent-choice').textContent = opponentText;
+                document.getElementById('result-opponent-choice').className = data.opponentChoice === 'cooperate' ? 'font-bold text-emerald-400' : 'font-bold text-rose-400';
+                
+                // 显示总积分
+                if (data.totalScore !== undefined) {
+                    const totalScoreElement = document.createElement('p');
+                    totalScoreElement.className = 'text-slate-300 text-sm';
+                    totalScoreElement.textContent = `总积分: ${data.totalScore}`;
+                    totalScoreElement.id = 'total-score';
+                    
+                    const scoreContainer = document.querySelector('#student-result .space-y-6');
+                    const existingTotalScore = document.getElementById('total-score');
+                    if (existingTotalScore) {
+                        existingTotalScore.remove();
+                    }
+                    scoreContainer.appendChild(totalScoreElement);
+                }
             }
         });
         
         // 教师端：仪表板更新事件
         socket.on('update_dashboard', (data) => {
             if (gameState.role === 'teacher') {
+                // 更新轮次显示
+                if (data.currentRound !== undefined && data.totalRounds !== undefined) {
+                    gameState.currentRound = data.currentRound;
+                    gameState.totalRounds = data.totalRounds;
+                    document.getElementById('current-round').textContent = data.currentRound;
+                    document.getElementById('total-rounds').textContent = data.totalRounds;
+                }
+                
                 // 更新统计数据
                 document.getElementById('participated-count').textContent = data.totalPlayers;
-                document.getElementById('cooperate-count').textContent = data.cooperateCount;
-                document.getElementById('betray-count').textContent = data.betrayCount;
-                document.getElementById('cooperate-rate').textContent = data.totalPlayers > 0 ? Math.round((data.cooperateCount / data.totalPlayers) * 100) + '%' : '0%';
-                
-                // 更新矩阵和分布条
-                updateMatrix(data.totalPlayers, data.cooperateCount, data.betrayCount);
+                if (data.ccCount !== undefined) {
+                    document.getElementById('cc-count').textContent = data.ccCount;
+                }
+                if (data.bbCount !== undefined) {
+                    document.getElementById('bb-count').textContent = data.bbCount;
+                }
+                if (data.cbCount !== undefined) {
+                    document.getElementById('cb-count').textContent = data.cbCount;
+                }
             }
         });
         
@@ -673,22 +756,88 @@
         // 游戏结束事件（教师端）
         socket.on('game_ended', (data) => {
             if (gameState.role === 'teacher' && data) {
+                // 更新轮次显示
+                if (data.currentRound !== undefined && data.totalRounds !== undefined) {
+                    gameState.currentRound = data.currentRound;
+                    gameState.totalRounds = data.totalRounds;
+                    document.getElementById('current-round').textContent = data.currentRound;
+                    document.getElementById('total-rounds').textContent = data.totalRounds;
+                }
+                
                 // 更新结果页数据
-                document.getElementById('final-coop').textContent = data.cooperateCount;
-                document.getElementById('final-betray').textContent = data.betrayCount;
-                document.getElementById('final-total').textContent = data.totalPlayers;
+                if (data.ccCount !== undefined) {
+                    document.getElementById('final-coop').textContent = data.ccCount;
+                }
+                if (data.bbCount !== undefined) {
+                    document.getElementById('final-betray').textContent = data.bbCount;
+                }
+                if (data.totalPlayers !== undefined) {
+                    document.getElementById('final-total').textContent = data.totalPlayers;
+                }
+                
+                // 保存历史数据
+                if (data.history) {
+                    gameState.history = data.history;
+                }
                 
                 // 生成分析文本
-                const coopRate = data.totalPlayers > 0 ? (data.cooperateCount / data.totalPlayers) : 0;
                 let analysis = '';
-                if (coopRate > 0.6) {
-                    analysis = `本班表现出较高的合作倾向（${Math.round(coopRate * 100)}%选择合作）。这体现了集体理性，虽然个体面临被背叛的风险，但大多数人选择了信任。在重复博弈中，这种策略可能带来长期收益。`;
-                } else if (coopRate < 0.4) {
-                    analysis = `本班表现出较高的竞争倾向（${Math.round((1-coopRate) * 100)}%选择背叛）。这反映了"囚徒困境"中的个体理性选择——在不知道对方选择的情况下，背叛是占优策略。但结果是集体次优（大家都只得1分而非3分）。`;
-                } else {
-                    analysis = `本班选择相对均衡（合作${Math.round(coopRate * 100)}% vs 背叛${Math.round((1-coopRate) * 100)}%）。这种混合策略在一次性博弈中可能达到纳什均衡。建议讨论：是什么因素影响了你的选择？信任还是自保？`;
+                if (data.ccCount !== undefined && data.bbCount !== undefined && data.cbCount !== undefined) {
+                    const totalGroups = data.ccCount + data.bbCount + data.cbCount;
+                    const ccRate = totalGroups > 0 ? (data.ccCount / totalGroups) : 0;
+                    const bbRate = totalGroups > 0 ? (data.bbCount / totalGroups) : 0;
+                    const cbRate = totalGroups > 0 ? (data.cbCount / totalGroups) : 0;
+                    
+                    if (ccRate > 0.5) {
+                        analysis = `本班表现出较高的合作倾向（${Math.round(ccRate * 100)}%的组选择双方合作）。这体现了集体理性，虽然个体面临被背叛的风险，但大多数人选择了信任。在重复博弈中，这种策略可能带来长期收益。`;
+                    } else if (bbRate > 0.5) {
+                        analysis = `本班表现出较高的竞争倾向（${Math.round(bbRate * 100)}%的组选择双方背叛）。这反映了"囚徒困境"中的个体理性选择——在不知道对方选择的情况下，背叛是占优策略。但结果是集体次优（大家都只得1分而非3分）。`;
+                    } else {
+                        analysis = `本班选择相对均衡（合作组${Math.round(ccRate * 100)}% vs 背叛组${Math.round(bbRate * 100)}% vs 混合组${Math.round(cbRate * 100)}%）。这种混合策略在一次性博弈中可能达到纳什均衡。建议讨论：是什么因素影响了你的选择？信任还是自保？`;
+                    }
                 }
                 document.getElementById('analysis-text').textContent = analysis;
+                
+                // 根据是否是最后一轮显示不同的按钮
+                if (data.currentRound === data.totalRounds) {
+                    // 最后一轮，显示查看全局分析按钮
+                    document.getElementById('next-round-btn').classList.add('hidden');
+                    document.getElementById('global-analysis-btn').classList.remove('hidden');
+                } else {
+                    // 非最后一轮，显示进入下一轮按钮
+                    document.getElementById('next-round-btn').classList.remove('hidden');
+                    document.getElementById('global-analysis-btn').classList.add('hidden');
+                }
+            }
+        });
+        
+        // 进入下一轮事件
+        socket.on('next_round', (data) => {
+            if (data.currentRound !== undefined && data.totalRounds !== undefined) {
+                gameState.currentRound = data.currentRound;
+                gameState.totalRounds = data.totalRounds;
+                
+                if (gameState.role === 'teacher') {
+                    // 教师端：更新轮次显示，重置界面
+                    document.getElementById('current-round').textContent = data.currentRound;
+                    document.getElementById('total-rounds').textContent = data.totalRounds;
+                    document.getElementById('results-view').classList.add('hidden');
+                    document.getElementById('control-dashboard').classList.remove('hidden');
+                    document.getElementById('timer-display').textContent = gameState.timeLimit;
+                    document.getElementById('timer-bar').style.width = '100%';
+                    document.getElementById('timer-bar').classList.remove('from-red-500', 'to-orange-500');
+                    document.getElementById('timer-bar').classList.add('from-indigo-500', 'to-purple-500');
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('start-btn').classList.remove('opacity-50');
+                } else if (gameState.role === 'student') {
+                    // 学生端：显示等待界面
+                    document.getElementById('student-result').classList.add('hidden');
+                    document.getElementById('student-done').classList.add('hidden');
+                    document.getElementById('student-wait').classList.remove('hidden');
+                    // 重置本地游戏状态
+                    gameState.isRunning = false;
+                    gameState.myChoice = null;
+                }
             }
         });
 
@@ -744,18 +893,28 @@
             const name = document.getElementById('room-name').value || '未命名房间';
             const time = parseInt(document.getElementById('time-limit').value) || 60;
             const targetPlayers = parseInt(document.getElementById('target-players').value) || 30;
+            const totalRounds = parseInt(document.getElementById('total-rounds').value) || 1;
+            
+            // 验证轮数
+            if (totalRounds < 1 || totalRounds > 10) {
+                alert('博弈轮数必须在1-10之间');
+                return;
+            }
             
             // 发送创建房间请求
             socket.emit('create_room', {
                 roomName: name,
                 timeLimit: time,
-                targetPlayers: targetPlayers
+                targetPlayers: targetPlayers,
+                totalRounds: totalRounds
             }, (response) => {
                 if (response.success) {
                     gameState.roomCode = response.roomCode;
                     gameState.roomName = name;
                     gameState.timeLimit = time;
                     gameState.timeRemaining = time;
+                    gameState.totalRounds = totalRounds;
+                    gameState.currentRound = 1;
                     
                     // 更新UI
                     document.getElementById('dashboard-room-name').textContent = name;
@@ -1015,7 +1174,8 @@
                 total: Object.keys(gameState.choices).length,
                 cooperate: Object.values(gameState.choices).filter(c => c === 'cooperate').length,
                 betray: Object.values(gameState.choices).filter(c => c === 'betray').length,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                history: gameState.history
             };
             
             const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
@@ -1024,6 +1184,76 @@
             a.href = url;
             a.download = `博弈结果_${gameState.roomCode}_${Date.now()}.json`;
             a.click();
+        }
+        
+        // 进入下一轮
+        function nextRound() {
+            // 发送进入下一轮请求
+            socket.emit('next_round', {
+                roomCode: gameState.roomCode
+            }, (response) => {
+                if (!response.success) {
+                    alert('进入下一轮失败，请重试');
+                }
+            });
+        }
+        
+        // 显示全局分析
+        function showGlobalAnalysis() {
+            document.getElementById('global-analysis').classList.remove('hidden');
+            
+            // 填充历史数据表格
+            const tableBody = document.getElementById('history-table-body');
+            tableBody.innerHTML = '';
+            
+            if (gameState.history && gameState.history.length > 0) {
+                gameState.history.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.className = 'border-b border-slate-700';
+                    
+                    row.innerHTML = `
+                        <td class="py-3 px-4">${item.round}</td>
+                        <td class="py-3 px-4">${item.ccCount}</td>
+                        <td class="py-3 px-4">${item.bbCount}</td>
+                        <td class="py-3 px-4">${item.cbCount}</td>
+                    `;
+                    
+                    tableBody.appendChild(row);
+                });
+                
+                // 简单的趋势图表（使用文本表示）
+                const chartContainer = document.getElementById('trend-chart');
+                chartContainer.innerHTML = `
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">合作组趋势</span>
+                            <div class="flex-1 ml-4 h-2 bg-slate-700 rounded-full overflow-hidden">
+                                <div class="h-full bg-green-500" style="width: ${Math.max(...gameState.history.map(h => h.ccCount)) / Math.max(...gameState.history.map(h => h.ccCount + h.bbCount + h.cbCount)) * 100}%"></div>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">背叛组趋势</span>
+                            <div class="flex-1 ml-4 h-2 bg-slate-700 rounded-full overflow-hidden">
+                                <div class="h-full bg-red-500" style="width: ${Math.max(...gameState.history.map(h => h.bbCount)) / Math.max(...gameState.history.map(h => h.ccCount + h.bbCount + h.cbCount)) * 100}%"></div>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">混合组趋势</span>
+                            <div class="flex-1 ml-4 h-2 bg-slate-700 rounded-full overflow-hidden">
+                                <div class="h-full bg-yellow-500" style="width: ${Math.max(...gameState.history.map(h => h.cbCount)) / Math.max(...gameState.history.map(h => h.ccCount + h.bbCount + h.cbCount)) * 100}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                tableBody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-slate-500">暂无历史数据</td></tr>';
+                document.getElementById('trend-chart').innerHTML = '<div class="flex items-center justify-center h-full text-slate-500">暂无趋势数据</div>';
+            }
+        }
+        
+        // 隐藏全局分析
+        function hideGlobalAnalysis() {
+            document.getElementById('global-analysis').classList.add('hidden');
         }
 
         // 键盘快捷键

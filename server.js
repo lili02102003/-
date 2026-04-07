@@ -44,7 +44,11 @@ io.on('connection', (socket) => {
       status: 'waiting', // waiting, playing, ended
       createdAt: new Date(),
       teacherSocketId: socket.id,
-      timer: null
+      timer: null,
+      totalRounds: data.totalRounds || 1, // 总轮数
+      currentRound: 1, // 当前轮次
+      history: [], // 每轮的统计数据历史
+      playerScores: {} // 玩家总积分
     };
     
     console.log(`房间创建成功: ${roomCode} - ${roomName}`);
@@ -254,6 +258,50 @@ io.on('connection', (socket) => {
     callback({ success: true });
   });
   
+  // 进入下一轮
+  socket.on('next_round', (data, callback) => {
+    const { roomCode } = data;
+    
+    if (!rooms[roomCode]) {
+      callback({ success: false, error: '房间不存在' });
+      return;
+    }
+    
+    const room = rooms[roomCode];
+    
+    // 检查是否还有轮次
+    if (room.currentRound >= room.totalRounds) {
+      callback({ success: false, error: '已达到最大轮次' });
+      return;
+    }
+    
+    // 增加轮次
+    room.currentRound++;
+    
+    // 清空选择记录
+    room.choices = {};
+    
+    // 重置游戏状态
+    room.status = 'waiting';
+    
+    // 停止计时器（如果正在运行）
+    if (room.timer) {
+      clearInterval(room.timer);
+      room.timer = null;
+    }
+    
+    console.log(`进入下一轮: ${roomCode} - 第${room.currentRound}/${room.totalRounds}轮`);
+    
+    // 向房间内所有客户端广播进入下一轮事件
+    io.to(roomCode).emit('next_round', {
+      currentRound: room.currentRound,
+      totalRounds: room.totalRounds
+    });
+    
+    // 向教师端发送成功响应
+    callback({ success: true });
+  });
+  
   // 监听客户端断开连接事件
   socket.on('disconnect', () => {
     console.log('客户端已断开连接:', socket.id);
@@ -323,13 +371,21 @@ function endGame(roomCode) {
   calculateResults(roomCode);
 }
 
+// 洗牌算法
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
 // 计算游戏结果
 function calculateResults(roomCode) {
   const room = rooms[roomCode];
   if (!room) return;
   
   const choices = room.choices;
-  const totalStudents = room.students.length;
   
   // 为未提交选择的学生默认为背叛
   for (const student of room.students) {
@@ -338,70 +394,125 @@ function calculateResults(roomCode) {
     }
   }
   
-  // 计算实际参与人数和合作人数
-  const actualPlayers = Object.keys(choices).length;
-  let cooperateCount = 0;
+  // 获取已提交选择的玩家
+  const activePlayers = room.students.filter(student => choices[student.id]);
+  const actualPlayers = activePlayers.length;
   
-  for (const choice of Object.values(choices)) {
-    if (choice === 'cooperate') {
-      cooperateCount++;
-    }
-  }
+  // 初始化统计数据
+  let ccCount = 0; // 双人合作组数
+  let bbCount = 0; // 双人背叛组数
+  let cbCount = 0; // 一人合作一人背叛组数
   
-  const betrayCount = actualPlayers - cooperateCount;
+  // 洗牌算法随机打乱玩家顺序
+  const shuffledPlayers = shuffleArray([...activePlayers]);
   
-  // 计算每个学生的得分
-  for (const student of room.students) {
-    const studentChoice = choices[student.id] || 'betray';
-    let score = 0;
-    
-    if (actualPlayers === 1) {
-      // 单人游戏，得0分
-      score = 0;
-    } else if (actualPlayers === 2) {
-      // 双人游戏，使用经典矩阵
-      const otherChoice = Object.values(choices).find(c => c !== studentChoice) || 'betray';
-      if (studentChoice === 'cooperate' && otherChoice === 'cooperate') {
-        score = 3;
-      } else if (studentChoice === 'cooperate' && otherChoice === 'betray') {
-        score = 0;
-      } else if (studentChoice === 'betray' && otherChoice === 'cooperate') {
-        score = 5;
+  // 两两分组
+  for (let i = 0; i < shuffledPlayers.length; i += 2) {
+    if (i + 1 < shuffledPlayers.length) {
+      // 正常两人分组
+      const player1 = shuffledPlayers[i];
+      const player2 = shuffledPlayers[i + 1];
+      
+      const choice1 = choices[player1.id];
+      const choice2 = choices[player2.id];
+      
+      let score1, score2;
+      
+      // 经典2人博弈矩阵计分
+      if (choice1 === 'cooperate' && choice2 === 'cooperate') {
+        score1 = 3;
+        score2 = 3;
+        ccCount++;
+      } else if (choice1 === 'betray' && choice2 === 'betray') {
+        score1 = 1;
+        score2 = 1;
+        bbCount++;
       } else {
-        score = 1;
+        if (choice1 === 'betray') {
+          score1 = 5;
+          score2 = 0;
+        } else {
+          score1 = 0;
+          score2 = 5;
+        }
+        cbCount++;
       }
+      
+      // 更新玩家总积分
+      room.playerScores[player1.id] = (room.playerScores[player1.id] || 0) + score1;
+      room.playerScores[player2.id] = (room.playerScores[player2.id] || 0) + score2;
+      
+      // 向玩家发送结果
+      io.to(player1.id).emit('game_result', {
+        score: score1,
+        choice: choice1,
+        opponentChoice: choice2,
+        isBotMatch: false,
+        totalScore: room.playerScores[player1.id]
+      });
+      
+      io.to(player2.id).emit('game_result', {
+        score: score2,
+        choice: choice2,
+        opponentChoice: choice1,
+        isBotMatch: false,
+        totalScore: room.playerScores[player2.id]
+      });
     } else {
-      // 多人游戏，使用平均期望模型
-      if (studentChoice === 'cooperate') {
-        // 合作的得分 = ((C-1)*3 + (N-C)*0) / (N-1)
-        score = Math.round(((cooperateCount - 1) * 3 + (actualPlayers - cooperateCount) * 0) / (actualPlayers - 1));
+      // 奇数玩家情况，匹配虚拟对手
+      const player = shuffledPlayers[i];
+      const choice = choices[player.id];
+      let score;
+      
+      // 虚拟对手默认选择合作
+      if (choice === 'cooperate') {
+        score = 3;
       } else {
-        // 背叛的得分 = (C*5 + (N-C-1)*1) / (N-1)
-        score = Math.round((cooperateCount * 5 + (actualPlayers - cooperateCount - 1) * 1) / (actualPlayers - 1));
+        score = 5;
       }
+      
+      // 更新玩家总积分
+      room.playerScores[player.id] = (room.playerScores[player.id] || 0) + score;
+      
+      // 向玩家发送结果
+      io.to(player.id).emit('game_result', {
+        score: score,
+        choice: choice,
+        opponentChoice: 'cooperate',
+        isBotMatch: true,
+        totalScore: room.playerScores[player.id]
+      });
     }
-    
-    // 向学生发送个人得分
-    io.to(student.id).emit('game_result', {
-      score: score,
-      choice: studentChoice,
-      cooperateCount: cooperateCount,
-      betrayCount: betrayCount
-    });
   }
+  
+  // 构建本轮统计数据
+  const roundData = {
+    round: room.currentRound,
+    ccCount: ccCount,
+    bbCount: bbCount,
+    cbCount: cbCount,
+    totalPlayers: actualPlayers
+  };
+  
+  // 添加到历史记录
+  room.history.push(roundData);
   
   // 向教师端发送统计数据
   io.to(room.teacherSocketId).emit('update_dashboard', {
     totalPlayers: actualPlayers,
-    cooperateCount: cooperateCount,
-    betrayCount: betrayCount
+    ccCount: ccCount,
+    bbCount: bbCount,
+    cbCount: cbCount,
+    currentRound: room.currentRound,
+    totalRounds: room.totalRounds
   });
   
   // 向教师端发送游戏结束事件，包含统计数据
   io.to(room.teacherSocketId).emit('game_ended', {
-    totalPlayers: actualPlayers,
-    cooperateCount: cooperateCount,
-    betrayCount: betrayCount
+    ...roundData,
+    currentRound: room.currentRound,
+    totalRounds: room.totalRounds,
+    history: room.history
   });
 }
 
