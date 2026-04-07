@@ -52,6 +52,7 @@ io.on('connection', (socket) => {
     };
     
     console.log(`房间创建成功: ${roomCode} - ${roomName}`);
+    socket.join(roomCode);
     callback({ success: true, roomCode });
   });
   
@@ -172,10 +173,10 @@ io.on('connection', (socket) => {
     
     // 更新房间状态和轮数信息
     room.status = 'playing';
-    if (totalRounds) {
+    if (totalRounds && room.currentRound === 1) {
       room.totalRounds = totalRounds;
     }
-    room.currentRound = 1;
+    // 绝不能在这里重置 room.currentRound = 1，否则会导致多轮博弈无法推进
     
     console.log(`游戏开始: ${roomCode} - ${room.name}, 共${room.totalRounds}轮`);
     
@@ -246,8 +247,11 @@ io.on('connection', (socket) => {
     // 清空选择记录
     room.choices = {};
     
-    // 重置游戏状态
+    // 深度重置游戏状态与历史数据
     room.status = 'waiting';
+    room.currentRound = 1;
+    room.history = [];
+    room.playerScores = {};
     
     // 停止计时器（如果正在运行）
     if (room.timer) {

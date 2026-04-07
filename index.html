@@ -198,7 +198,7 @@
                 <div>
                     <h2 class="text-3xl font-bold" id="dashboard-room-name">房间名称</h2>
                     <p class="text-slate-400 mt-1">房间代码: <span id="room-code-display" class="font-mono text-indigo-400 text-xl tracking-wider"></span></p>
-                    <p class="text-slate-400 mt-1">当前进度：第<span id="current-round" class="font-mono text-indigo-400">1</span>/<span id="total-rounds" class="font-mono text-indigo-400">1</span>轮</p>
+                    <p class="text-slate-400 mt-1">当前进度：第<span id="current-round" class="font-mono text-indigo-400">1</span>/<span id="display-total-rounds" class="font-mono text-indigo-400">1</span>轮</p>
                 </div>
                 <div class="flex gap-3">
                     <button onclick="resetGame()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm">重置</button>
@@ -709,7 +709,7 @@
                     gameState.currentRound = data.currentRound;
                     gameState.totalRounds = data.totalRounds;
                     document.getElementById('current-round').textContent = data.currentRound;
-                    document.getElementById('total-rounds').textContent = data.totalRounds;
+                    document.getElementById('display-total-rounds').textContent = data.totalRounds;
                 }
                 
                 // 更新统计数据
@@ -722,6 +722,18 @@
                 }
                 if (data.cbCount !== undefined) {
                     document.getElementById('cb-count').textContent = data.cbCount;
+                }
+                
+                // 更新进度条
+                if (data.cooperateCount !== undefined && data.betrayCount !== undefined) {
+                    const total = data.cooperateCount + data.betrayCount;
+                    if (total > 0) {
+                        const coopPct = Math.round((data.cooperateCount / total) * 100);
+                        document.getElementById('bar-cooperate').style.width = coopPct + '%';
+                        document.getElementById('bar-betray').style.width = (100 - coopPct) + '%';
+                        document.getElementById('bar-coop-text').textContent = coopPct + '%';
+                        document.getElementById('bar-betray-text').textContent = (100 - coopPct) + '%';
+                    }
                 }
             }
         });
@@ -766,19 +778,38 @@
                     gameState.currentRound = data.currentRound;
                     gameState.totalRounds = data.totalRounds;
                     document.getElementById('current-round').textContent = data.currentRound;
-                    document.getElementById('total-rounds').textContent = data.totalRounds;
+                    document.getElementById('display-total-rounds').textContent = data.totalRounds;
                 }
                 
                 // 更新结果页数据
                 if (data.ccCount !== undefined) {
                     document.getElementById('final-cc').textContent = data.ccCount;
+                    document.getElementById('num-cc').textContent = data.ccCount; // 填入大屏矩阵
                 }
                 if (data.bbCount !== undefined) {
                     document.getElementById('final-bb').textContent = data.bbCount;
+                    document.getElementById('num-bb').textContent = data.bbCount; // 填入大屏矩阵
                 }
                 if (data.cbCount !== undefined) {
                     document.getElementById('final-cb').textContent = data.cbCount;
+                    document.getElementById('num-cb').textContent = data.cbCount; // 一合一背对称填入
+                    document.getElementById('num-bc').textContent = data.cbCount;
                 }
+                // 增加水位线动画效果
+                const totalGroups = (data.ccCount || 0) + (data.bbCount || 0) + (data.cbCount || 0);
+                if (totalGroups > 0) {
+                    if (data.ccCount !== undefined) document.getElementById('fill-cc').style.height = (data.ccCount / totalGroups * 100) + '%';
+                    if (data.bbCount !== undefined) document.getElementById('fill-bb').style.height = (data.bbCount / totalGroups * 100) + '%';
+                    if (data.cbCount !== undefined) {
+                        document.getElementById('fill-cb').style.height = (data.cbCount / totalGroups * 100) + '%';
+                        document.getElementById('fill-bc').style.height = (data.cbCount / totalGroups * 100) + '%';
+                    }
+                }
+
+                // 【关键修改：延迟3秒跳转结算页，让全班清晰看到矩阵的数据变化和动画】
+                setTimeout(() => {
+                    showResults();
+                }, 3000);
                 
                 // 保存历史数据
                 if (data.history) {
@@ -825,7 +856,7 @@
                 if (gameState.role === 'teacher') {
                     // 教师端：更新轮次显示，重置界面
                     document.getElementById('current-round').textContent = data.currentRound;
-                    document.getElementById('total-rounds').textContent = data.totalRounds;
+                    document.getElementById('display-total-rounds').textContent = data.totalRounds;
                     document.getElementById('results-view').classList.add('hidden');
                     document.getElementById('control-dashboard').classList.remove('hidden');
                     document.getElementById('timer-display').textContent = gameState.timeLimit;
@@ -840,6 +871,7 @@
                     document.getElementById('cc-count').textContent = '0';
                     document.getElementById('bb-count').textContent = '0';
                     document.getElementById('cb-count').textContent = '0';
+                    updateStats();
                 } else if (gameState.role === 'student') {
                     // 学生端：显示等待界面
                     document.getElementById('student-result').classList.add('hidden');
@@ -936,7 +968,7 @@
                     // 更新UI
                     document.getElementById('dashboard-room-name').textContent = name;
                     document.getElementById('current-round').textContent = gameState.currentRound;
-                    document.getElementById('total-rounds').textContent = gameState.totalRounds;
+                    document.getElementById('display-total-rounds').textContent = gameState.totalRounds;
                     document.getElementById('room-code-display').textContent = gameState.roomCode;
                     document.getElementById('timer-display').textContent = time;
                     
@@ -1162,14 +1194,62 @@
 
 
         function downloadResults() {
+            // 计算所有轮次的汇总数据
+            let totalCooperate = 0;
+            let totalBetray = 0;
+            let totalPlayers = 0;
+            
+            if (gameState.history && gameState.history.length > 0) {
+                gameState.history.forEach(round => {
+                    // 计算每轮的合作和背叛人数
+                    const ccCooperate = (round.ccCount || 0) * 2; // 双人合作组，每组2人合作
+                    const bbBetray = (round.bbCount || 0) * 2; // 双人背叛组，每组2人背叛
+                    const cbCooperate = (round.cbCount || 0); // 一合一背组，每组1人合作
+                    const cbBetray = (round.cbCount || 0); // 一合一背组，每组1人背叛
+                    
+                    totalCooperate += ccCooperate + cbCooperate;
+                    totalBetray += bbBetray + cbBetray;
+                    totalPlayers += round.totalPlayers || 0;
+                });
+            }
+            
             const data = {
                 room: gameState.roomName,
                 code: gameState.roomCode,
-                total: Object.keys(gameState.choices).length,
-                cooperate: Object.values(gameState.choices).filter(c => c === 'cooperate').length,
-                betray: Object.values(gameState.choices).filter(c => c === 'betray').length,
+                total: totalPlayers,
+                cooperate: totalCooperate,
+                betray: totalBetray,
                 timestamp: new Date().toISOString(),
-                history: gameState.history
+                totalRounds: gameState.totalRounds,
+                currentRound: gameState.currentRound,
+                history: gameState.history,
+                // 新增全局汇总数据
+                summary: {
+                    totalRounds: gameState.history ? gameState.history.length : 0,
+                    totalPlayers: totalPlayers,
+                    totalCooperate: totalCooperate,
+                    totalBetray: totalBetray,
+                    cooperationRate: totalPlayers > 0 ? (totalCooperate / totalPlayers * 100).toFixed(2) + '%' : '0%'
+                },
+                // 新增每轮详细数据
+                roundDetails: gameState.history ? gameState.history.map(round => {
+                    const ccCooperate = (round.ccCount || 0) * 2;
+                    const bbBetray = (round.bbCount || 0) * 2;
+                    const cbCooperate = (round.cbCount || 0);
+                    const cbBetray = (round.cbCount || 0);
+                    const roundTotal = round.totalPlayers || 0;
+                    
+                    return {
+                        round: round.round,
+                        totalPlayers: roundTotal,
+                        cooperate: ccCooperate + cbCooperate,
+                        betray: bbBetray + cbBetray,
+                        ccCount: round.ccCount || 0,
+                        bbCount: round.bbCount || 0,
+                        cbCount: round.cbCount || 0,
+                        cooperationRate: roundTotal > 0 ? ((ccCooperate + cbCooperate) / roundTotal * 100).toFixed(2) + '%' : '0%'
+                    };
+                }) : []
             };
             
             const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
