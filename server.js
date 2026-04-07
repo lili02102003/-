@@ -173,7 +173,7 @@ io.on('connection', (socket) => {
     
     // 更新房间状态和轮数信息
     room.status = 'playing';
-    if (totalRounds && room.currentRound === 1) {
+    if (totalRounds) {
       room.totalRounds = totalRounds;
     }
     // 绝不能在这里重置 room.currentRound = 1，否则会导致多轮博弈无法推进
