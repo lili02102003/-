@@ -156,7 +156,7 @@ io.on('connection', (socket) => {
   
   // 开始游戏
   socket.on('start_game', (data, callback) => {
-    const { roomCode } = data;
+    const { roomCode, totalRounds } = data;
     
     if (!rooms[roomCode]) {
       callback({ success: false, error: '房间不存在' });
@@ -170,14 +170,20 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // 更新房间状态
+    // 更新房间状态和轮数信息
     room.status = 'playing';
+    if (totalRounds) {
+      room.totalRounds = totalRounds;
+    }
+    room.currentRound = 1;
     
-    console.log(`游戏开始: ${roomCode} - ${room.name}`);
+    console.log(`游戏开始: ${roomCode} - ${room.name}, 共${room.totalRounds}轮`);
     
     // 向房间内所有客户端广播游戏开始事件
     io.to(roomCode).emit('game_started', {
-      timeLimit: room.timeLimit
+      timeLimit: room.timeLimit,
+      totalRounds: room.totalRounds,
+      currentRound: room.currentRound
     });
     
     // 向教师端发送成功响应
@@ -363,9 +369,6 @@ function endGame(roomCode) {
   room.status = 'ended';
   
   console.log(`游戏结束: ${roomCode} - ${room.name}`);
-  
-  // 向房间内所有客户端广播游戏结束事件
-  io.to(roomCode).emit('game_ended');
   
   // 计算游戏结果
   calculateResults(roomCode);

@@ -829,6 +829,12 @@
                     document.getElementById('timer-bar').classList.add('from-indigo-500', 'to-purple-500');
                     document.getElementById('start-btn').disabled = false;
                     document.getElementById('start-btn').classList.remove('opacity-50');
+                    
+                    // 重置统计数据显示
+                    document.getElementById('participated-count').textContent = '0';
+                    document.getElementById('cc-count').textContent = '0';
+                    document.getElementById('bb-count').textContent = '0';
+                    document.getElementById('cb-count').textContent = '0';
                 } else if (gameState.role === 'student') {
                     // 学生端：显示等待界面
                     document.getElementById('student-result').classList.add('hidden');
@@ -974,7 +980,8 @@
             
             // 发送开始游戏请求
             socket.emit('start_game', {
-                roomCode: gameState.roomCode
+                roomCode: gameState.roomCode,
+                totalRounds: gameState.totalRounds
             }, (response) => {
                 if (response.success) {
                     gameState.isRunning = true;
