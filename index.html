@@ -633,6 +633,16 @@
                 
                 // 更新学生端倒计时
                 document.getElementById('student-timer').textContent = data.timeLimit;
+                
+                // 解锁按钮
+                document.getElementById('btn-cooperate').disabled = false;
+                document.getElementById('btn-betray').disabled = false;
+                document.getElementById('btn-cooperate').classList.remove('opacity-50');
+                document.getElementById('btn-betray').classList.remove('opacity-50');
+                
+                // 重置选择状态
+                gameState.myChoice = null;
+                gameState.choices = {};
             }
         });
         
@@ -935,6 +945,16 @@
             document.getElementById('student-play').classList.add('hidden');
             document.getElementById('student-done').classList.add('hidden');
             document.getElementById('student-result').classList.add('hidden');
+            
+            // 解锁学生按钮
+            try {
+                document.getElementById('btn-cooperate').disabled = false;
+                document.getElementById('btn-betray').disabled = false;
+                document.getElementById('btn-cooperate').classList.remove('opacity-50');
+                document.getElementById('btn-betray').classList.remove('opacity-50');
+            } catch (e) {
+                // 按钮可能还未创建，忽略错误
+            }
         }
 
         // 创建房间
